@@ -96,7 +96,8 @@
 {% macro create_temporary_view(relation, sql) -%}
   --  We can't use temporary tables with `create ... as ()` syntax in Hive2
   -- create temporary view {{ relation.include(schema=false) }} as
-  create temporary table {{ relation.include(schema=false) }} as
+
+  create or replace table {{ relation }} as
     {{ sql }}
 {% endmacro %}
 
@@ -129,7 +130,7 @@
     {% if config.get('file_format', validator=validation.any[basestring]) == 'delta' %}
       create or replace table {{ relation }}
     {% else %}
-      create {% if is_external == true -%}external{%- endif %} table {{ relation }}
+      create {% if is_external == true -%}external{%- endif %} or replace table {{ relation }}
     {% endif %}
     {{ options_clause() }}
     {% if table_type == 'iceberg' -%}
@@ -150,7 +151,8 @@
 
 
 {% macro hive__create_view_as(relation, sql) -%}
-  create or replace view {{ relation }}
+
+  create or replace table {{ relation }}
   {{ comment_clause() }}
   as
     {{ sql }}
@@ -171,14 +173,14 @@
 {# use describe extended for more information #}
 {% macro hive__get_columns_in_relation(relation) -%}
   {% call statement('get_columns_in_relation', fetch_result=True) %}
-    describe formatted {{ relation }}
+    describe {{ relation }}
   {% endcall %}
   {% do return(load_result('get_columns_in_relation').table) %}
 {% endmacro %}
 
 {% macro hive__list_relations_without_caching(relation) %}
   {% call statement('list_relations_without_caching', fetch_result=True) -%}
-    show table extended in {{ relation }} like '*'
+    show table  in {{ relation }} like '*'
   {% endcall %}
 
   {% do return(load_result('list_relations_without_caching').table) %}
