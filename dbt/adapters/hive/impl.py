@@ -131,7 +131,6 @@ class HiveAdapter(SQLAdapter):
         kwargs = {"schema": schema_relation}
         try:
             result_tables = self.execute_macro("hive__list_tables_without_caching", kwargs=kwargs)
-            result_views = self.execute_macro("hive__list_views_without_caching", kwargs=kwargs)
         except dbt.exceptions.DbtRuntimeError as e:
             errmsg = getattr(e, "msg", "")
             if f"Database '{schema_relation}' not found" in errmsg:
@@ -141,53 +140,15 @@ class HiveAdapter(SQLAdapter):
                 logger.debug(f"{description} {schema_relation}: {e.msg}")
                 return []
 
-        # hive2
-        # Collect table/view separately
-        # Unfortunatly, Hive2 does not distincguish table/view
-        # Currently views are also listed in `show tables`
-        # https://issues.apache.org/jira/browse/HIVE-14558
-        # all_rows = result_tables
-        # relations = []
-        # for row in all_rows:
-        #    relation_type = self.get_relation_type(f"{schema_relation}.{row['tab_name']}")
-        #    relations.append(
-        #         self.Relation.create(
-        #            schema=schema_relation.schema,
-        #            identifier=row['tab_name'],
-        #            type=relation_type
-        #        )
-        #    )
-
-        # in Hive 2, result_tables has table + view, result_views only has views
-        # so we build a result_tables_without_view that doesnot have views
-
-        result_tables_without_view = []
-        for row in result_tables:
-            # check if this table is view
-            is_view = (
-                len(list(filter(lambda x: x["tab_name"] == row["tab_name"], result_views))) == 1
-            )
-            if not is_view:
-                result_tables_without_view.append(row)
-
         relations = []
-        for row in result_tables_without_view:
+        for row in result_tables:
             relations.append(
                 self.Relation.create(
                     schema=schema_relation.schema,
-                    identifier=row["tab_name"],
+                    identifier=row[1],
                     type="table",
                 )
             )
-        for row in result_views:
-            relations.append(
-                self.Relation.create(
-                    schema=schema_relation.schema,
-                    identifier=row["tab_name"],
-                    type="view",
-                )
-            )
-
         return relations
 
     def get_relation(self, database: str, schema: str, identifier: str) -> Optional[BaseRelation]:
@@ -558,3 +519,4 @@ select
 from row_count_diff
 join diff_count using (id)
 """.strip()
+
