@@ -34,7 +34,7 @@
   {%- set raw_file_format = config.get('file_format', default='parquet') -%}
   {%- set incremental_strategy = config.get('incremental_strategy', default='append') -%}
   {% if incremental_strategy == None %}
-      {% set incremental_strategy = 'append' %}
+      {% set incremental_strategy = 'merge' %}
   {% endif %}
 
   {% do target_relation.log_relation(incremental_strategy) %}
