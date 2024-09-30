@@ -16,3 +16,8 @@
 {% macro hive__current_timestamp() -%}
     current_timestamp()
 {%- endmacro %}
+
+{% macro default__current_timestamp_backcompat() %}
+    CAST(current_timestamp() AS TIMESTAMP)
+{% endmacro %}
+
