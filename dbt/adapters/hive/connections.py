@@ -11,35 +11,31 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-import time
 import json
+import os
+import time
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Optional, Tuple
 from multiprocessing.context import SpawnContext
+from typing import Any, Optional, Tuple
 
 import dbt.exceptions
 import impala.dbapi
-from dbt.adapters.contracts.connection import Credentials
-from dbt.adapters.sql import SQLConnectionManager
+import yaml
 from dbt.adapters.contracts.connection import (
-    AdapterResponse,
     AdapterRequiredConfig,
+    AdapterResponse,
     Connection,
     ConnectionState,
+    Credentials,
 )
 from dbt.adapters.events.logging import AdapterLogger
-from dbt_common.events.functions import fire_event
 from dbt.adapters.events.types import ConnectionUsed, SQLQuery, SQLQueryStatus
+from dbt.adapters.sql import SQLConnectionManager
 from dbt.utils import DECIMALS
-
-import json
-import time
-
-import impala.dbapi
-from impala.error import HttpError
-from impala.error import HiveServer2Error
+from dbt_common.events.functions import fire_event
+from impala.error import HiveServer2Error, HttpError
 
 import dbt.adapters.hive.__version__ as ver
 import dbt.adapters.hive.cloudera_tracking as tracker
@@ -273,7 +269,9 @@ class HiveConnectionManager(SQLConnectionManager):
         except HttpError as httpError:
             logger.debug(f"Authorization error: {httpError}")
             raise dbt.exceptions.DbtRuntimeError(
-                "HTTP Authorization error: " + str(httpError) + ", please check your credentials"
+                "HTTP Authorization error: "
+                + str(httpError)
+                + ", please check your credentials"
             )
         except HiveServer2Error as hiveError:
             logger.debug(f"Server connection error: {hiveError}")
@@ -363,7 +361,9 @@ class HiveConnectionManager(SQLConnectionManager):
         additional_info = {}
         if self.query_header:
             try:
-                additional_info = json.loads(self.query_header.comment.query_comment.strip())
+                additional_info = json.loads(
+                    self.query_header.comment.query_comment.strip()
+                )
             except Exception as ex:  # silently ignore error for parsing
                 additional_info = {}
                 logger.debug(f"Unable to get query header {ex}")
@@ -410,10 +410,37 @@ class HiveConnectionManager(SQLConnectionManager):
             if bindings:
                 # to avoid None as being treated as string, convert it to empty string
                 bindings = list(
-                    map(lambda x: x if x else x if x != None and len(str(x)) > 0 else "", bindings)
+                    map(
+                        lambda x: (
+                            x if x else x if x is not None and len(str(x)) > 0 else ""
+                        ),
+                        bindings,
+                    )
                 )
 
             query_exception = None
+
+            session_params_path = os.path.join(os.getcwd(), "session_parameters.yml")
+
+            try:
+                with open(session_params_path, "r", encoding="UTF-8") as f:
+                    session_parameters = yaml.safe_load(f)
+            except FileNotFoundError as e:
+                logger.error(
+                    f"Session parameters file not found at {session_params_path}: {e}"
+                )
+                raise
+            except yaml.YAMLError as e:
+                logger.error(f"Error parsing YAML: {e}")
+                raise
+
+            for key, value in session_parameters.items():
+                try:
+                    cursor.execute(f"SET `{key}`=`{value}`")
+                except Exception as e:
+                    logger.error(f"Error setting session parameter '{key}': {e}")
+                    raise
+
             try:
                 configuration = {"paramstyle": "format"}
                 cursor.execute(sql, bindings, configuration)
