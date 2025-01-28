@@ -20,7 +20,6 @@ from datetime import datetime
 from multiprocessing.context import SpawnContext
 from typing import Any, Optional, Tuple
 
-import dbt.exceptions
 import impala.dbapi
 import yaml
 from dbt.adapters.contracts.connection import (
@@ -35,6 +34,7 @@ from dbt.adapters.events.types import ConnectionUsed, SQLQuery, SQLQueryStatus
 from dbt.adapters.sql import SQLConnectionManager
 from dbt.utils import DECIMALS
 from dbt_common.events.functions import fire_event
+from dbt_common.exceptions import DbtConfigError, DbtRuntimeError
 from impala.error import HiveServer2Error, HttpError
 
 import dbt.adapters.hive.__version__ as ver
@@ -76,7 +76,7 @@ class HiveCredentials(Credentials):
     def __post_init__(self):
         # hive classifies database and schema as the same thing
         if self.database is not None and self.database != self.schema:
-            raise dbt.exceptions.DbtRuntimeError(
+            raise DbtRuntimeError(
                 f"    schema: {self.schema} \n"
                 f"    database: {self.database} \n"
                 f"On Hive, database must be omitted or have the same value as"
@@ -228,7 +228,7 @@ class HiveConnectionManager(SQLConnectionManager):
                     ca_cert=credentials.ca_cert,
                 )
             else:
-                raise dbt.exceptions.DbtProfileError(
+                raise DbtConfigError(
                     f"Invalid auth_type {credentials.auth_type} provided"
                 )
             connection_end_time = time.time()
@@ -268,14 +268,14 @@ class HiveConnectionManager(SQLConnectionManager):
             yield
         except HttpError as httpError:
             logger.debug(f"Authorization error: {httpError}")
-            raise dbt.exceptions.DbtRuntimeError(
+            raise DbtRuntimeError(
                 "HTTP Authorization error: "
                 + str(httpError)
                 + ", please check your credentials"
             )
         except HiveServer2Error as hiveError:
             logger.debug(f"Server connection error: {hiveError}")
-            raise dbt.exceptions.DbtRuntimeError(
+            raise DbtRuntimeError(
                 "Unable to establish connection to Hive server: " + str(hiveError)
             )
         except Exception as exc:
@@ -283,7 +283,7 @@ class HiveConnectionManager(SQLConnectionManager):
             logger.debug(exc)
             if len(exc.args) == 0:
                 raise
-            raise dbt.exceptions.DbtRuntimeError(str(exc))
+            raise DbtRuntimeError(str(exc))
 
     def cancel(self, connection):
         connection.handle.cancel()
@@ -493,7 +493,7 @@ class HiveConnectionManager(SQLConnectionManager):
 
         for key in required:
             if not hasattr(creds, key):
-                raise dbt.exceptions.DbtProfileError(
+                raise DbtConfigError(
                     "The config '{}' is required when using the {} method"
                     " to connect to Hive".format(key, method)
                 )
