@@ -18,7 +18,6 @@ from typing import Any, Dict, FrozenSet, Iterable, List, Optional, Tuple, Union
 
 import agate
 
-# import dbt.exceptions
 from dbt.adapters.base import AdapterConfig, BaseRelation
 from dbt.adapters.base.impl import catch_as_completed
 from dbt.adapters.contracts.relation import RelationConfig
@@ -31,6 +30,7 @@ from dbt_common.utils import executor
 import dbt
 import dbt.adapters.hive.cloudera_tracking as tracker
 from dbt.adapters.hive import HiveColumn, HiveConnectionManager, HiveRelation
+
 
 logger = AdapterLogger("Hive")
 
