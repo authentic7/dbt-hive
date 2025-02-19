@@ -14,27 +14,23 @@
 from collections import OrderedDict
 from concurrent.futures import Future
 from dataclasses import dataclass
-from typing import Optional, List, Dict, Any, Union, Iterable, FrozenSet, Tuple
+from typing import Any, Dict, FrozenSet, Iterable, List, Optional, Tuple, Union
+
 import agate
 
-import dbt
-import dbt.exceptions
-
-from dbt.adapters.base import AdapterConfig
+from dbt.adapters.base import AdapterConfig, BaseRelation
 from dbt.adapters.base.impl import catch_as_completed
-from dbt.adapters.sql import SQLAdapter
 from dbt.adapters.contracts.relation import RelationConfig
-
-import dbt.adapters.hive.cloudera_tracking as tracker
-from dbt.adapters.hive import HiveConnectionManager
-from dbt.adapters.hive import HiveRelation
-from dbt.adapters.hive import HiveColumn
-from dbt.adapters.base import BaseRelation
+from dbt.adapters.events.logging import AdapterLogger
+from dbt.adapters.sql import SQLAdapter
+from dbt_common.clients import agate_helper
+from dbt_common.exceptions import CompilationError, DbtRuntimeError
 from dbt_common.utils import executor
 
-from dbt_common.clients import agate_helper
+import dbt
+import dbt.adapters.hive.cloudera_tracking as tracker
+from dbt.adapters.hive import HiveColumn, HiveConnectionManager, HiveRelation
 
-from dbt.adapters.events.logging import AdapterLogger
 
 logger = AdapterLogger("Hive")
 
@@ -105,7 +101,7 @@ class HiveAdapter(SQLAdapter):
         """Cache a new schema in dbt. It will show up in `list relations`."""
         if schema is None:
             name = self.nice_connection_name()
-            dbt.exceptions.raise_compiler_error(f"Attempted to cache a null schema for {name}")
+            CompilationError(f"Attempted to cache a null schema for {name}")
         if dbt.flags.USE_CACHE:
             self.cache.add_schema(None, schema)
         # so jinja doesn't render things
@@ -125,14 +121,18 @@ class HiveAdapter(SQLAdapter):
     #                 break
     #         return result
 
-    def list_relations_without_caching(self, schema_relation: HiveRelation) -> List[HiveRelation]:
+    def list_relations_without_caching(
+        self, schema_relation: HiveRelation
+    ) -> List[HiveRelation]:
         """Get a list of Relation(table or view) by SQL directly
         Use different SQL statement for view/table
         """
         kwargs = {"schema": schema_relation}
         try:
-            result_tables = self.execute_macro("hive__list_tables_without_caching", kwargs=kwargs)
-        except dbt.exceptions.DbtRuntimeError as e:
+            result_tables = self.execute_macro(
+                "hive__list_tables_without_caching", kwargs=kwargs
+            )
+        except DbtRuntimeError as e:
             errmsg = getattr(e, "msg", "")
             if f"Database '{schema_relation}' not found" in errmsg:
                 return []
@@ -152,7 +152,9 @@ class HiveAdapter(SQLAdapter):
             )
         return relations
 
-    def get_relation(self, database: str, schema: str, identifier: str) -> Optional[BaseRelation]:
+    def get_relation(
+        self, database: str, schema: str, identifier: str
+    ) -> Optional[BaseRelation]:
         """Get a Relation for own list"""
         if not self.Relation.get_default_quote_policy().database:
             database = None
@@ -200,7 +202,9 @@ class HiveAdapter(SQLAdapter):
         table_separator_pos = self.find_table_information_separator(dict_rows)
 
         column_separator_pos = (
-            partition_separator_pos if partition_separator_pos > 0 else table_separator_pos
+            partition_separator_pos
+            if partition_separator_pos > 0
+            else table_separator_pos
         )
         logger.debug(
             f"relation={relation}, "
@@ -215,7 +219,9 @@ class HiveAdapter(SQLAdapter):
         metadata = {
             col["col_name"].split(":")[0].strip(): col["data_type"].strip()
             for col in raw_rows[table_separator_pos + 1 :]
-            if col["col_name"] and not col["col_name"].startswith("#") and col["data_type"]
+            if col["col_name"]
+            and not col["col_name"].startswith("#")
+            and col["data_type"]
         }
 
         # raw_table_stats = metadata.get(KEY_TABLE_STATISTICS)
@@ -274,7 +280,7 @@ class HiveAdapter(SQLAdapter):
         try:
             rows: List[agate.Row] = super().get_columns_in_relation(relation)
             columns = self.parse_describe_formatted(relation, rows)
-        except dbt.exceptions.DbtRuntimeError as e:
+        except DbtRuntimeError as e:
             # impala would throw error when table doesn't exist
             errmsg = getattr(e, "msg", "")
             if (
@@ -289,7 +295,9 @@ class HiveAdapter(SQLAdapter):
 
         return columns
 
-    def _get_columns_for_catalog(self, relation: HiveRelation) -> Iterable[Dict[str, Any]]:
+    def _get_columns_for_catalog(
+        self, relation: HiveRelation
+    ) -> Iterable[Dict[str, Any]]:
         """Get columns for catalog. Used by get_one_catalog"""
         # columns = self.parse_columns_from_information(relation)
         columns = self.get_columns_in_relation(relation)
@@ -310,13 +318,16 @@ class HiveAdapter(SQLAdapter):
         return dict(properties)
 
     def get_catalog(
-        self, relation_configs: Iterable[RelationConfig], used_schemas: FrozenSet[Tuple[str, str]]
+        self,
+        relation_configs: Iterable[RelationConfig],
+        used_schemas: FrozenSet[Tuple[str, str]],
     ):
         """Return a catalogs that contains information of all schemas"""
         schema_map = self._get_catalog_schemas(relation_configs)
         if len(schema_map) > 1:
-            dbt.exceptions.raise_compiler_error(
-                f"Expected only one database in get_catalog, found " f"{list(schema_map)}"
+            CompilationError(
+                f"Expected only one database in get_catalog, found "
+                f"{list(schema_map)}"
             )
 
         # run heavy job in other threads
@@ -325,7 +336,9 @@ class HiveAdapter(SQLAdapter):
             for info, schemas in schema_map.items():
                 for schema in schemas:
                     futures.append(
-                        tpe.submit_connected(self, schema, self._get_one_catalog, info, [schema])
+                        tpe.submit_connected(
+                            self, schema, self._get_one_catalog, info, [schema]
+                        )
                     )
             # at this point all catalogs in futures list will be merged into one
             # insides`catch_on_completed` method of the parent class
@@ -352,8 +365,9 @@ class HiveAdapter(SQLAdapter):
         threadself.get_columns_in_relation
         """
         if len(schemas) != 1:
-            dbt.exceptions.raise_compiler_error(
-                f"Expected only one schema in Hive _get_one_catalog, found " f"{schemas}"
+            CompilationError(
+                f"Expected only one schema in Hive _get_one_catalog, found "
+                f"{schemas}"
             )
 
         database = information_schema.database
@@ -372,7 +386,9 @@ class HiveAdapter(SQLAdapter):
             columns.extend(self._get_columns_for_catalog(relation))
 
         if len(columns) > 0:
-            text_types = agate_helper.build_type_tester(["table_owner", "table_database"])
+            text_types = agate_helper.build_type_tester(
+                ["table_owner", "table_database"]
+            )
         else:
             text_types = []
 
@@ -382,7 +398,9 @@ class HiveAdapter(SQLAdapter):
         )
 
     def check_schema_exists(self, database, schema):
-        results = self.execute_macro(LIST_SCHEMAS_MACRO_NAME, kwargs={"database": database})
+        results = self.execute_macro(
+            LIST_SCHEMAS_MACRO_NAME, kwargs={"database": database}
+        )
 
         exists = True if schema in [row[0] for row in results] else False
         return exists
@@ -409,7 +427,9 @@ class HiveAdapter(SQLAdapter):
             }
             tracker.track_usage(payload)
         except Exception as ex:
-            logger.debug(f"Failed to fetch permissions for user: {username}. Exception: {ex}")
+            logger.debug(
+                f"Failed to fetch permissions for user: {username}. Exception: {ex}"
+            )
             self.connections.get_thread_connection().handle.close()
 
         self.connections.get_thread_connection().handle.close()
@@ -510,4 +530,3 @@ select
 from row_count_diff
 join diff_count using (id)
 """.strip()
-
